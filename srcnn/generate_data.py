@@ -38,6 +38,7 @@ class gen():
         self.step = step
         self.number = nums
 
+    # 核心代码：生成异常数据，共七步。
     def generate_train_data(self, value, back_k=0):
         def normalize(a):
             amin = np.min(a)
@@ -54,12 +55,25 @@ class gen():
         for pt in range(self.win_siz, length - back, self.step):
             head = max(0, pt - self.win_siz)
             tail = min(length - back, pt)
+
+            # 步骤1：数据预处理
             data = np.array(value[head:tail])
             data = data.astype(np.float64)
-            data = normalize(data)
+            data = normalize(data)  # # 归一化到[0,3]范围，数值空间的大小直接影响异常的"表达能力"。在狭小的[0,1]空间里，异常很难"伸展拳脚"，而[0,3]给了异常足够的"发挥空间"。[0,3]归一化本质上是在"放大信号"，让神经网络更容易"听见"异常的声音。
+            
+            # 步骤2：确定异常点数量
             num = np.random.randint(1, self.number)
+            
+            # 步骤3：随机选择异常点位置
             ids = np.random.choice(self.win_siz, num, replace=False)
+
+            # 步骤4：初始化标签数组（0代表正常，1代表正常，起手全0）
             lbs = np.zeros(self.win_siz, dtype=np.int64)
+            
+            # 步骤5：防偏差控制机制：
+            # 监控窗口末尾附近（win_siz-6位置）是否有异常， 如果长期没有，强制添加一个防止模型偏差。
+            # 这个机制确实是为了确保模型能检测出最新的异常。它解决的是异常检测中的一个经典问题："历史敏感，当下迟钝"
+            # 通过强制在窗口末尾注入异常样本，确保模型具备实时异常检测的能力
             if (self.win_siz - 6) not in ids:
                 self.control += np.random.random()
             else:
@@ -67,11 +81,16 @@ class gen():
             if self.control > 100:
                 ids[0] = self.win_siz - 6
                 self.control = 0
+
+            # 步骤6：计算异常生成参数，为下一步做准备
             mean = np.mean(data)
             dataavg = average_filter(data)
             var = np.var(data)
-            for id in ids:
-                data[id] += (dataavg[id] + mean) * np.random.randn() * min((1 + var), 10)
+
+            # 步骤7：生成异常并设置标签
+            for id in ids:  # 对每个选中的位置注入异常值
+                data[id] += (dataavg[id] + mean) * np.random.randn() * min((1 + var), 10)   # 异常强度基于：（平滑值 + 均值） * 高斯噪声 * 方差缩放
+                # 将对应标签位置设为1（异常）
                 lbs[id] = 1
             tmp.append([data.tolist(), lbs.tolist()])
         return tmp
